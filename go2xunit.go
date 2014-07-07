@@ -222,16 +222,29 @@ func gc_Parse(rd io.Reader) ([]*Suite, error) {
 	find_start := regexp.MustCompile(gc_startRE).FindStringSubmatch
 	find_end := regexp.MustCompile(gc_endRE).FindStringSubmatch
 
-	scanner := bufio.NewScanner(rd)
-	var test *Test
-	var suites = make(map[string]*Suite)
-	var suiteName string
-	var out []string
+	reader := bufio.NewReader(rd)
+	var (
+		test      *Test
+		suites    = make(map[string]*Suite)
+		suiteName string
+		out       []string
+		line      string
+		lnum      int
+		err       error
+	)
 
-	for lnum := 1; scanner.Scan(); lnum++ {
-		line := scanner.Text()
+	for {
+		line, err = reader.ReadString('\n')
+		if err != nil {
+			break
+		}
+		lnum++
 		tokens := find_start(line)
 		if len(tokens) > 0 {
+			if ignoredTests[tokens[2]] {
+				continue
+			}
+
 			if test != nil {
 				return nil, fmt.Errorf("%d: start in middle\n", lnum)
 			}
@@ -243,14 +256,18 @@ func gc_Parse(rd io.Reader) ([]*Suite, error) {
 
 		tokens = find_end(line)
 		if len(tokens) > 0 {
+			if ignoredTests[tokens[3]] {
+				continue
+			}
 			if test == nil {
 				return nil, fmt.Errorf("%d: orphan end", lnum)
 			}
 			if (tokens[2] != suiteName) || (tokens[3] != test.Name) {
-				return nil, fmt.Errorf("%d: suite/name mismatch", lnum)
+				return nil, fmt.Errorf("%d: suite/name mismatch: got %s:%s, expected %s:%s",
+					lnum, tokens[2], tokens[3], suiteName, test.Name)
 			}
 			test.Message = strings.Join(out, "\n")
-			test.Time = tokens[4]
+			test.Time = strings.TrimSpace(tokens[4])
 			test.Failed = (tokens[1] == "FAIL")
 
 			suite, ok := suites[suiteName]
@@ -272,11 +289,18 @@ func gc_Parse(rd io.Reader) ([]*Suite, error) {
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, err
+	if err == io.EOF {
+		err = nil
 	}
 
-	return map2arr(suites), nil
+	return map2arr(suites), err
+}
+
+var ignoredTests = map[string]bool{
+	"SetUpTest":     true,
+	"TearDownTest":  true,
+	"SetUpSuite":    true,
+	"TearDownSuite": true,
 }
 
 func hasFailures(suites []*Suite) bool {
