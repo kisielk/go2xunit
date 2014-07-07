@@ -40,13 +40,14 @@ const (
 	gc_startRE = "START: [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)"
 	// PASS: mmath_test.go:16: MySuite.TestAdd	0.000s
 	// FAIL: mmath_test.go:35: MySuite.TestDiv
-	gc_endRE = "(PASS|FAIL|SKIP): [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)([[:space:]]+([0-9]+.[0-9]+))?"
+	gc_endRE = "(PASS|FAIL|SKIP|MISS|PANIC): [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)([[:space:]]+([0-9]+.[0-9]+))?"
 )
 
 type Test struct {
 	Name, Time, Message string
 	Failed              bool
 	Skipped             bool
+	Error               bool
 }
 
 type Suite struct {
@@ -69,6 +70,16 @@ func (suite *Suite) NumFailed() int {
 		}
 	}
 
+	return count
+}
+
+func (suite *Suite) NumError() int {
+	count := 0
+	for _, test := range suite.Tests {
+		if test.Error {
+			count++
+		}
+	}
 	return count
 }
 
@@ -266,9 +277,10 @@ func gc_Parse(rd io.Reader) ([]*Suite, error) {
 				return nil, fmt.Errorf("%d: suite/name mismatch: got %s:%s, expected %s:%s",
 					lnum, tokens[2], tokens[3], suiteName, test.Name)
 			}
-			test.Message = strings.Join(out, "\n")
+			test.Message = strings.Join(out, "")
 			test.Time = strings.TrimSpace(tokens[4])
-			test.Failed = (tokens[1] == "FAIL")
+			test.Failed = (tokens[1] == "FAIL" || tokens[1] == "PANIC")
+			test.Error = (tokens[1] == "MISS")
 			test.Skipped = (tokens[1] == "SKIP")
 
 			suite, ok := suites[suiteName]
@@ -298,10 +310,8 @@ func gc_Parse(rd io.Reader) ([]*Suite, error) {
 }
 
 var ignoredTests = map[string]bool{
-	"SetUpTest":     true,
-	"TearDownTest":  true,
-	"SetUpSuite":    true,
-	"TearDownSuite": true,
+	"SetUpTest":    true,
+	"TearDownTest": true,
 }
 
 func hasFailures(suites []*Suite) bool {
@@ -315,9 +325,10 @@ func hasFailures(suites []*Suite) bool {
 
 var xmlTemplate string = `<?xml version="1.0" encoding="utf-8"?>
 {{if .Multi}}<testsuites>{{end}}
-{{range $suite := .Suites}}  <testsuite name="{{.Name}}" tests="{{.Count}}" errors="0" failures="{{.NumFailed}}" skip="{{.NumSkipped}}">
+{{range $suite := .Suites}}  <testsuite name="{{.Name}}" tests="{{.Count}}" errors="{{.NumError}}" failures="{{.NumFailed}}" skip="{{.NumSkipped}}">
 {{range  $test := $suite.Tests}}    <testcase classname="{{$suite.Name}}" name="{{$test.Name}}" time="{{$test.Time}}">
 {{if $test.Skipped }}      <skipped/> {{end}}
+{{if $test.Error }}      <error/> {{end}}
 {{if $test.Failed }}      <failure type="go.error" message="error">
         <![CDATA[{{$test.Message}}]]>
       </failure>{{end}}    </testcase>
