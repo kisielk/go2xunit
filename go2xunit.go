@@ -40,7 +40,7 @@ const (
 	gc_startRE = "START: [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)"
 	// PASS: mmath_test.go:16: MySuite.TestAdd	0.000s
 	// FAIL: mmath_test.go:35: MySuite.TestDiv
-	gc_endRE = "(PASS|FAIL): [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)([[:space:]]+([0-9]+.[0-9]+))?"
+	gc_endRE = "(PASS|FAIL|SKIP): [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)([[:space:]]+([0-9]+.[0-9]+))?"
 )
 
 type Test struct {
@@ -246,7 +246,7 @@ func gc_Parse(rd io.Reader) ([]*Suite, error) {
 			}
 
 			if test != nil {
-				return nil, fmt.Errorf("%d: start in middle\n", lnum)
+				return nil, fmt.Errorf("%d: start in middle of %s:%s", lnum, suiteName, test.Name)
 			}
 			suiteName = tokens[1]
 			test = &Test{Name: tokens[2]}
@@ -269,6 +269,7 @@ func gc_Parse(rd io.Reader) ([]*Suite, error) {
 			test.Message = strings.Join(out, "\n")
 			test.Time = strings.TrimSpace(tokens[4])
 			test.Failed = (tokens[1] == "FAIL")
+			test.Skipped = (tokens[1] == "SKIP")
 
 			suite, ok := suites[suiteName]
 			if !ok {
