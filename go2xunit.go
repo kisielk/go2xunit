@@ -41,6 +41,8 @@ const (
 	// PASS: mmath_test.go:16: MySuite.TestAdd	0.000s
 	// FAIL: mmath_test.go:35: MySuite.TestDiv
 	gc_endRE = "(PASS|FAIL|SKIP|MISS|PANIC): [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)([[:space:]]+([0-9]+.[0-9]+))?"
+
+	raceRE = "^WARNING: DATA RACE"
 )
 
 type Test struct {
@@ -98,8 +100,9 @@ func (suite *Suite) Count() int {
 	return len(suite.Tests)
 }
 
-func gt_Parse(rd io.Reader) ([]*Suite, error) {
+func gt_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 	find_start := regexp.MustCompile(gt_startRE).FindStringSubmatch
+	find_race := regexp.MustCompile(raceRE).MatchString
 	find_end := regexp.MustCompile(gt_endRE).FindStringSubmatch
 	find_suite := regexp.MustCompile(gt_suiteRE).FindStringSubmatch
 	is_nofiles := regexp.MustCompile(gt_noFiles).MatchString
@@ -107,9 +110,12 @@ func gt_Parse(rd io.Reader) ([]*Suite, error) {
 	is_exit := regexp.MustCompile("^exit status -?\\d+").MatchString
 
 	suites := []*Suite{}
-	var curTest *Test
-	var curSuite *Suite
-	var out []string
+	var (
+		curTest   *Test
+		curSuite  *Suite
+		out       []string
+		foundRace bool
+	)
 
 	// Handles a test that ended with a panic.
 	handlePanic := func() {
@@ -163,8 +169,11 @@ func gt_Parse(rd io.Reader) ([]*Suite, error) {
 			curTest = &Test{
 				Name: tokens[1],
 			}
+			foundRace = false
 			continue
 		}
+
+		foundRace = foundRace || (race && find_race(line))
 
 		tokens = find_end(line)
 		if tokens != nil {
@@ -174,7 +183,7 @@ func gt_Parse(rd io.Reader) ([]*Suite, error) {
 			if tokens[2] != curTest.Name {
 				return nil, fmt.Errorf("%d: name mismatch", lnum)
 			}
-			curTest.Failed = (tokens[1] == "FAIL")
+			curTest.Failed = (tokens[1] == "FAIL" || foundRace)
 			curTest.Skipped = (tokens[1] == "SKIP")
 			curTest.Time = tokens[3]
 			curTest.Message = strings.Join(out, "\n")
@@ -229,8 +238,9 @@ func map2arr(m map[string]*Suite) []*Suite {
 
 // gc_Parse parses output of "go test -gocheck.vv", returns a list of tests
 // See data/gocheck.out for an example
-func gc_Parse(rd io.Reader) ([]*Suite, error) {
+func gc_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 	find_start := regexp.MustCompile(gc_startRE).FindStringSubmatch
+	find_race := regexp.MustCompile(raceRE).MatchString
 	find_end := regexp.MustCompile(gc_endRE).FindStringSubmatch
 
 	reader := bufio.NewReader(rd)
@@ -242,6 +252,7 @@ func gc_Parse(rd io.Reader) ([]*Suite, error) {
 		line      string
 		lnum      int
 		err       error
+		foundRace bool
 	)
 
 	for {
@@ -262,8 +273,11 @@ func gc_Parse(rd io.Reader) ([]*Suite, error) {
 			suiteName = tokens[1]
 			test = &Test{Name: tokens[2]}
 			out = []string{}
+			foundRace = false
 			continue
 		}
+
+		foundRace = foundRace || (race && find_race(line))
 
 		tokens = find_end(line)
 		if len(tokens) > 0 {
@@ -279,7 +293,7 @@ func gc_Parse(rd io.Reader) ([]*Suite, error) {
 			}
 			test.Message = strings.Join(out, "")
 			test.Time = strings.TrimSpace(tokens[4])
-			test.Failed = (tokens[1] == "FAIL" || tokens[1] == "PANIC")
+			test.Failed = (tokens[1] == "FAIL" || tokens[1] == "PANIC" || foundRace)
 			test.Error = (tokens[1] == "MISS")
 			test.Skipped = (tokens[1] == "SKIP")
 
@@ -397,6 +411,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
 	bamboo := flag.Bool("bamboo", false, "xml compatible with Atlassian's Bamboo")
 	is_gocheck := flag.Bool("gocheck", false, "parse gocheck output")
+	race := flag.Bool("race", false, "mark tests with data races as failed")
 	flag.Parse()
 
 	if *showVersion {
@@ -416,7 +431,7 @@ func main() {
 		log.Fatalf("error: %s", err)
 	}
 
-	var parse func(rd io.Reader) ([]*Suite, error)
+	var parse func(rd io.Reader, race bool) ([]*Suite, error)
 
 	if *is_gocheck {
 		parse = gc_Parse
@@ -424,7 +439,7 @@ func main() {
 		parse = gt_Parse
 	}
 
-	suites, err := parse(input)
+	suites, err := parse(input, *race)
 	if err != nil {
 		log.Fatalf("error: %s", err)
 	}
