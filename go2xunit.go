@@ -14,38 +14,36 @@ import (
 	"unicode/utf8"
 )
 
+// gotest regular expressions
 const (
-	version = "0.2.12"
-
-	// gotest regular expressions
-
 	// === RUN TestAdd
-	gt_startRE = "^=== RUN:? ([a-zA-Z_][^[:space:]]*)"
+	gtStartRE = "^=== RUN:? ([a-zA-Z_][^[:space:]]*)"
 
 	// --- PASS: TestSub (0.00 seconds)
 	// --- FAIL: TestSubFail (0.00 seconds)
 	// --- SKIP: TestSubSkip (0.00 seconds)
-	gt_endRE = "^--- (PASS|FAIL|SKIP): ([a-zA-Z_][^[:space:]]*) \\((\\d+(.\\d+)?)"
+	gtEndRE = "^--- (PASS|FAIL|SKIP): ([a-zA-Z_][^[:space:]]*) \\((\\d+(.\\d+)?)"
 
 	// FAIL	_/home/miki/Projects/goroot/src/xunit	0.004s
 	// ok  	_/home/miki/Projects/goroot/src/anotherTest	0.000s
-	gt_suiteRE = "^(ok|FAIL)[ \t]+([^ \t]+)[ \t]+(\\d+.\\d+)"
+	gtSuiteRE = "^(ok|FAIL)[ \t]+([^ \t]+)[ \t]+(\\d+.\\d+)"
 
 	// ?       alipay  [no test files]
-	gt_noFiles = "^\\?.*\\[no test files\\]$"
+	gtNoFilesRE = "^\\?.*\\[no test files\\]$"
 	// FAIL    node/config [build failed]
-	gt_buildFailed = `^FAIL.*\[(build|setup) failed\]$`
+	gtBuildFailedRE = `^FAIL.*\[(build|setup) failed\]$`
+)
 
-	// gocheck regular expressions
-
+// gocheck regular expressions
+const (
 	// START: mmath_test.go:16: MySuite.TestAdd
-	gc_startRE = "START: [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)"
+	gcStartRE = "START: [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)"
 	// PASS: mmath_test.go:16: MySuite.TestAdd	0.000s
 	// FAIL: mmath_test.go:35: MySuite.TestDiv
-	gc_endRE = "(PASS|FAIL|SKIP|MISS|PANIC): [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)([[:space:]]+([0-9]+.[0-9]+))?"
-
-	raceRE = "^WARNING: DATA RACE"
+	gcEndRE = "(PASS|FAIL|SKIP|MISS|PANIC): [^:]+:[^:]+: ([A-Za-z_][[:word:]]*).([A-Za-z_][[:word:]]*)([[:space:]]+([0-9]+.[0-9]+))?"
 )
+
+const raceRE = "^WARNING: DATA RACE"
 
 type Test struct {
 	Name, Time, Message string
@@ -102,14 +100,14 @@ func (suite *Suite) Count() int {
 	return len(suite.Tests)
 }
 
-func gt_Parse(rd io.Reader, race bool) ([]*Suite, error) {
-	find_start := regexp.MustCompile(gt_startRE).FindStringSubmatch
-	find_race := regexp.MustCompile(raceRE).MatchString
-	find_end := regexp.MustCompile(gt_endRE).FindStringSubmatch
-	find_suite := regexp.MustCompile(gt_suiteRE).FindStringSubmatch
-	is_nofiles := regexp.MustCompile(gt_noFiles).MatchString
-	is_buildFailed := regexp.MustCompile(gt_buildFailed).MatchString
-	is_exit := regexp.MustCompile("^exit status -?\\d+").MatchString
+func ParseGoTest(rd io.Reader, race bool) ([]*Suite, error) {
+	findStart := regexp.MustCompile(gtStartRE).FindStringSubmatch
+	findRace := regexp.MustCompile(raceRE).MatchString
+	findEnd := regexp.MustCompile(gtEndRE).FindStringSubmatch
+	findSuite := regexp.MustCompile(gtSuiteRE).FindStringSubmatch
+	isNoFiles := regexp.MustCompile(gtNoFilesRE).MatchString
+	isBuildFailed := regexp.MustCompile(gtBuildFailedRE).MatchString
+	isExit := regexp.MustCompile("^exit status -?\\d+").MatchString
 
 	suites := []*Suite{}
 	var (
@@ -149,11 +147,11 @@ func gt_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 		line := scanner.Text()
 
 		// TODO: Only outside a suite/test, report as empty suite?
-		if is_nofiles(line) {
+		if isNoFiles(line) {
 			continue
 		}
 
-		if is_buildFailed(line) {
+		if isBuildFailed(line) {
 			return nil, fmt.Errorf("%d: package build failed: %s", lnum, line)
 		}
 
@@ -161,7 +159,7 @@ func gt_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 			curSuite = &Suite{}
 		}
 
-		tokens := find_start(line)
+		tokens := findStart(line)
 		if tokens != nil {
 			if curTest != nil {
 				// This occurs when the last test ended with a panic.
@@ -177,9 +175,9 @@ func gt_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 			continue
 		}
 
-		foundRace = foundRace || (race && find_race(line))
+		foundRace = foundRace || (race && findRace(line))
 
-		tokens = find_end(line)
+		tokens = findEnd(line)
 		if tokens != nil {
 			if curTest == nil {
 				return nil, fmt.Errorf("%d: orphan end test", lnum)
@@ -197,7 +195,7 @@ func gt_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 			continue
 		}
 
-		tokens = find_suite(line)
+		tokens = findSuite(line)
 		if tokens != nil {
 			if curTest != nil {
 				// This occurs when the last test ended with a panic.
@@ -213,7 +211,7 @@ func gt_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 			continue
 		}
 
-		if is_exit(line) || (line == "FAIL") || (line == "PASS") {
+		if isExit(line) || (line == "FAIL") || (line == "PASS") {
 			continue
 		}
 
@@ -230,10 +228,6 @@ func gt_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 func map2arr(m map[string]*Suite) []*Suite {
 	arr := make([]*Suite, 0, len(m))
 	for _, suite := range m {
-		/* FIXME:
-		suite.Status =
-		suite.Time =
-		*/
 		arr = append(arr, suite)
 	}
 
@@ -256,12 +250,12 @@ func scanPrintable(data []byte, atEOF bool) (advance int, token []byte, err erro
 	return
 }
 
-// gc_Parse parses output of "go test -gocheck.vv", returns a list of tests
+// ParseGoCheck parses output of "go test -gocheck.vv", returns a list of tests
 // See data/gocheck.out for an example
-func gc_Parse(rd io.Reader, race bool) ([]*Suite, error) {
-	find_start := regexp.MustCompile(gc_startRE).FindStringSubmatch
-	find_race := regexp.MustCompile(raceRE).MatchString
-	find_end := regexp.MustCompile(gc_endRE).FindStringSubmatch
+func ParseGoCheck(rd io.Reader, race bool) ([]*Suite, error) {
+	findStart := regexp.MustCompile(gcStartRE).FindStringSubmatch
+	findRace := regexp.MustCompile(raceRE).MatchString
+	findEnd := regexp.MustCompile(gcEndRE).FindStringSubmatch
 
 	var (
 		test      *Test
@@ -276,7 +270,7 @@ func gc_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 
 	for lnum := 1; scanner.Scan(); lnum++ {
 		line := scanner.Text()
-		tokens := find_start(line)
+		tokens := findStart(line)
 		if len(tokens) > 0 {
 			if ignoredTests[tokens[2]] {
 				continue
@@ -292,9 +286,9 @@ func gc_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 			continue
 		}
 
-		foundRace = foundRace || (race && find_race(line))
+		foundRace = foundRace || (race && findRace(line))
 
-		tokens = find_end(line)
+		tokens = findEnd(line)
 		if len(tokens) > 0 {
 			if ignoredTests[tokens[3]] {
 				continue
@@ -408,16 +402,10 @@ func main() {
 	inputFile := flag.String("input", "", "input file (default to stdin)")
 	outputFile := flag.String("output", "", "output file (default to stdout)")
 	fail := flag.Bool("fail", false, "fail (non zero exit) if any test failed")
-	showVersion := flag.Bool("version", false, "print version and exit")
 	bamboo := flag.Bool("bamboo", false, "xml compatible with Atlassian's Bamboo")
-	is_gocheck := flag.Bool("gocheck", false, "parse gocheck output")
+	gocheck := flag.Bool("gocheck", false, "parse gocheck output")
 	race := flag.Bool("race", false, "mark tests with data races as failed")
 	flag.Parse()
-
-	if *showVersion {
-		fmt.Println(version)
-		os.Exit(0)
-	}
 
 	// No time ... prefix for error messages
 	log.SetFlags(0)
@@ -431,12 +419,9 @@ func main() {
 		log.Fatalf("error: %s", err)
 	}
 
-	var parse func(rd io.Reader, race bool) ([]*Suite, error)
-
-	if *is_gocheck {
-		parse = gc_Parse
-	} else {
-		parse = gt_Parse
+	parse := ParseGoTest
+	if *gocheck {
+		parse = ParseGoCheck
 	}
 
 	suites, err := parse(input, *race)
