@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -140,7 +139,7 @@ func ParseGoTest(rd io.Reader, race bool) ([]*Suite, error) {
 		return nil
 	}
 
-	scanner := bufio.NewScanner(rd)
+	scanner := NewScanner(rd)
 	scanner.Split(scanPrintable)
 
 	for lnum := 1; scanner.Scan(); lnum++ {
@@ -235,7 +234,7 @@ func map2arr(m map[string]*Suite) []*Suite {
 }
 
 func scanPrintable(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	advance, token, err = bufio.ScanLines(data, atEOF)
+	advance, token, err = ScanLines(data, atEOF)
 	if err == nil && token != nil {
 		s := make([]byte, 0, len(token))
 		for len(token) > 0 {
@@ -265,7 +264,7 @@ func ParseGoCheck(rd io.Reader, race bool) ([]*Suite, error) {
 		foundRace bool
 	)
 
-	scanner := bufio.NewScanner(rd)
+	scanner := NewScanner(rd)
 	scanner.Split(scanPrintable)
 
 	for lnum := 1; scanner.Scan(); lnum++ {
