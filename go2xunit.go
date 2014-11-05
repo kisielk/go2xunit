@@ -347,7 +347,7 @@ func hasFailures(suites []*Suite) bool {
 	return false
 }
 
-var xmlTemplate string = `<?xml version="1.0" encoding="utf-8"?>
+var xmlTemplate = template.Must(template.New("xml").Parse(`<?xml version="1.0" encoding="utf-8"?>
 {{if .Multi}}<testsuites>{{end}}
 {{range $suite := .Suites}}  <testsuite name="{{.Name}}" tests="{{.Count}}" errors="{{.NumError}}" failures="{{.NumFailed}}" skip="{{.NumSkipped}}">
 {{range  $test := $suite.Tests}}    <testcase classname="{{$suite.Name}}" name="{{$test.Name}}" time="{{$test.Time}}">
@@ -358,25 +358,15 @@ var xmlTemplate string = `<?xml version="1.0" encoding="utf-8"?>
       </failure>{{end}}    </testcase>
 {{end}}  </testsuite>
 {{end}}{{if .Multi}}</testsuites>{{end}}
-`
+`))
 
 // writeXML exits xunit XML of tests to out
-func writeXML(suites []*Suite, out io.Writer, bamboo bool) {
+func writeXML(suites []*Suite, out io.Writer, bamboo bool) error {
 	testsResult := TestResults{
 		Suites: suites,
 		Multi:  bamboo || (len(suites) > 1),
 	}
-	t := template.New("test template")
-	t, err := t.Parse(xmlTemplate)
-	if err != nil {
-		fmt.Println("Error en parse %v", err)
-		return
-	}
-	err = t.Execute(out, testsResult)
-	if err != nil {
-		fmt.Println("Error en execute %v", err)
-		return
-	}
+	return xmlTemplate.Execute(out, testsResult)
 }
 
 // getInput return input io.Reader from file name, if file name is - it will
@@ -458,7 +448,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	writeXML(suites, output, *bamboo)
+	err = writeXML(suites, output, *bamboo)
+	if err != nil {
+		log.Fatalln("error writing output:", err)
+	}
 	if *fail && hasFailures(suites) {
 		os.Exit(1)
 	}
