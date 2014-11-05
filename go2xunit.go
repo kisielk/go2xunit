@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"text/template"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -141,6 +143,8 @@ func gt_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 	}
 
 	scanner := bufio.NewScanner(rd)
+	scanner.Split(scanPrintable)
+
 	for lnum := 1; scanner.Scan(); lnum++ {
 		line := scanner.Text()
 
@@ -236,6 +240,22 @@ func map2arr(m map[string]*Suite) []*Suite {
 	return arr
 }
 
+func scanPrintable(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	advance, token, err = bufio.ScanLines(data, atEOF)
+	if err == nil && token != nil {
+		s := make([]byte, 0, len(token))
+		for len(token) > 0 {
+			r, l := utf8.DecodeRune(token)
+			if unicode.IsGraphic(r) || unicode.IsSpace(r) {
+				s = append(s, token[:l]...)
+			}
+			token = token[l:]
+		}
+		token = s
+	}
+	return
+}
+
 // gc_Parse parses output of "go test -gocheck.vv", returns a list of tests
 // See data/gocheck.out for an example
 func gc_Parse(rd io.Reader, race bool) ([]*Suite, error) {
@@ -243,24 +263,19 @@ func gc_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 	find_race := regexp.MustCompile(raceRE).MatchString
 	find_end := regexp.MustCompile(gc_endRE).FindStringSubmatch
 
-	reader := bufio.NewReader(rd)
 	var (
 		test      *Test
 		suites    = make(map[string]*Suite)
 		suiteName string
 		out       []string
-		line      string
-		lnum      int
-		err       error
 		foundRace bool
 	)
 
-	for {
-		line, err = reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		lnum++
+	scanner := bufio.NewScanner(rd)
+	scanner.Split(scanPrintable)
+
+	for lnum := 1; scanner.Scan(); lnum++ {
+		line := scanner.Text()
 		tokens := find_start(line)
 		if len(tokens) > 0 {
 			if ignoredTests[tokens[2]] {
@@ -291,7 +306,7 @@ func gc_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 				return nil, fmt.Errorf("%d: suite/name mismatch: got %s:%s, expected %s:%s",
 					lnum, tokens[2], tokens[3], suiteName, test.Name)
 			}
-			test.Message = strings.Join(out, "")
+			test.Message = strings.Join(out, "\n")
 			test.Time = strings.TrimSpace(tokens[4])
 			test.Failed = (tokens[1] == "FAIL" || tokens[1] == "PANIC" || foundRace)
 			test.Error = (tokens[1] == "MISS")
@@ -315,12 +330,7 @@ func gc_Parse(rd io.Reader, race bool) ([]*Suite, error) {
 			out = append(out, line)
 		}
 	}
-
-	if err == io.EOF {
-		err = nil
-	}
-
-	return map2arr(suites), err
+	return map2arr(suites), scanner.Err()
 }
 
 var ignoredTests = map[string]bool{
